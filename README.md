@@ -26,7 +26,9 @@ Bring Z.AI's GLM models into GitHub Copilot Chat with your own API key (BYOK) â€
 - **Activity heatmap.** **GLM: Show Activity** (or the Activity button on the usage panel) renders the z.ai Activity page: cumulative / peak tokens, usage duration, streaks, and a 365-day heatmap with Daily / Weekly / Cumulative modes. Coding Plan only.
 
 <p align="center">
-  <img src="docs/glm-usage-panel.png" alt="GLM Usage panel showing session, weekly, and web-search quota with reset countdowns for a GLM Coding plan" width="760">
+  <img src="docs/glm-usage-panel.png" alt="GLM Usage panel with z.ai-style 5-hour and weekly limit cards, credits, reset countdowns, and a Reset Quota card with redeem buttons for a GLM Coding plan" width="470">
+  <br>
+  <img src="docs/glm-activity-panel.png" alt="GLM Activity panel with cumulative, peak, duration, and streak stat cards above a 365-day GitHub-style usage heatmap in Daily mode" width="760">
 </p>
 
 - **Keys stay in your OS keychain by default.** **GLM: Set API Key** stores your key via VS Code `SecretStorage` (macOS, Windows, Linux). The extension also honors a settings fallback for CI or automation, so do not put real keys in workspace settings.
