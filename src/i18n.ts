@@ -1,0 +1,415 @@
+import * as vscode from 'vscode';
+
+/** Runtime UI strings (toasts, prompts, errors, picker labels). */
+const en: Record<string, string> = {
+	// Model picker
+	'model.glm-4.7.detail': 'Legacy model',
+	'model.glm-4.7.tooltip':
+		'Legacy model. GLM-4.7 — 200K context, strong agentic coding and reasoning. Available on Coding Plan and Standard API.',
+	'model.glm-5.detail': 'Legacy model',
+	'model.glm-5.tooltip': 'Legacy model. GLM-5 — 200K context, advanced reasoning and coding. Standard API only.',
+	'model.glm-5.1.detail': 'Legacy model',
+	'model.glm-5.1.tooltip': 'Legacy model. GLM-5.1 — latest GLM-5 series, 200K context. Standard API only.',
+	'model.glm-5.2.detail': 'Flagship coding model, 1M context',
+	'model.glm-5.2.tooltip':
+		'GLM-5.2 — flagship GLM coding model, 1M context, selectable thinking effort. Available on Coding Plan and Standard API.',
+	'model.glm-5.3.detail': 'Default frontier coding model, 1M context',
+	'model.glm-5.3.tooltip':
+		'GLM-5.3 — default frontier coding model, 1M context, with mandatory Low, High, or Max thinking effort (Max by default). Coding Plan only.',
+	'model.glm-5.3-flash.detail': 'Fast multimodal model, 1M context',
+	'model.glm-5.3-flash.tooltip':
+		'GLM-5.3-Flash — fast multimodal model, 1M context, native image input, and mandatory Low, High, or Max thinking effort (Max by default). Available on Coding Plan and Standard API.',
+	'model.glm-5.3-flashx.detail': 'Faster multimodal model, 1M context',
+	'model.glm-5.3-flashx.tooltip':
+		'GLM-5.3-FlashX — faster multimodal model, 1M context, native image input, and mandatory Low, High, or Max thinking effort (Max by default). Standard API only.',
+	'model.glm-4.5-air.detail': 'Legacy model',
+	'model.glm-4.5-air.tooltip': 'Legacy model. GLM-4.5 Air — lightweight, fast, and low-cost. Available on both plans.',
+	'model.custom.detail': 'Custom model',
+
+	// Auth
+	'auth.apiKeyRequiredDetail': 'Run "GLM: Set API Key" to configure.',
+	'auth.prompt':
+		'Enter your GLM API key (format: id.secret). Coding Plan keys come from z.ai; standard keys from the GLM Open Platform.',
+	'auth.placeholder': 'your-id.your-secret',
+	'auth.emptyValidation': 'API key cannot be empty',
+	'auth.saved': 'GLM API key saved.',
+	'auth.removed': 'GLM API key removed.',
+	'auth.notConfigured': 'GLM API key not configured. Run "GLM: Set API Key" from the Command Palette.',
+
+	// Thinking control
+	'thinking.title': 'Thinking',
+	'thinking.on': 'On',
+	'thinking.off': 'Off',
+	'thinking.on.desc': 'Enable step-by-step reasoning (recommended)',
+	'thinking.off.desc': 'Disable reasoning for faster responses',
+
+	// Thinking effort control
+	'effort.title': 'Thinking Effort',
+	'effort.none.label': 'None',
+	'effort.none.desc': 'No reasoning — fastest, lowest quota',
+	'effort.low.label': 'Low',
+	'effort.low.desc': 'Light reasoning — faster responses with lower quota use',
+	'effort.high.label': 'High',
+	'effort.high.desc': 'Balanced reasoning (recommended)',
+	'effort.max.label': 'Max',
+	'effort.max.desc': 'Deepest reasoning — best for hard coding, uses more quota',
+
+	// Request limits
+	'request.toolsLimitExceeded':
+		'GLM supports at most {0} tools in one request, but this request has {1}. Use VS Code Configure Tools to disable tools you rarely use.',
+	'request.retry.rateLimited': 'GLM is rate limited. Retrying in {0}s ({1}/{2}).',
+	'request.retry.busy': 'GLM is busy. Retrying in {0}s ({1}/{2}).',
+
+	// Image input
+	'vision.progress.one': 'Analyzing the attached image with GLM-5.3-Flash…',
+	'vision.progress.many': 'Analyzing {0} attached images with GLM-5.3-Flash…',
+	'vision.notice.failed':
+		'Note: some image analysis failed ({0}); the affected image content was omitted.',
+	'vision.error.empty': 'GLM-5.3-Flash returned no image description',
+	'vision.error.unsupportedType': 'unsupported image type {0}',
+	'vision.error.tooLarge': 'the image is larger than {0} MB',
+	'vision.error.tooMany': 'more than {0} images attached at once',
+	'vision.error.noKey': 'no GLM chat API key is configured',
+	'vision.error.timeout': 'image analysis timed out',
+	'migration.visionCleanupFailed':
+		'Some data from the retired image integration could not be removed. GLM will still start; see the logs for details.',
+
+	// HTTP errors
+	'error.http.400': '[{0}] Invalid request. Check the request parameters.',
+	'error.http.401':
+		'[{0}] Authentication failed. Check your GLM API key, or create one for your selected plan.',
+	'error.http.401.withCreateApiKeyLink':
+		'[{0}] Authentication failed. Check your GLM API key, or [create one]({1}).',
+	'error.http.402': '[{0}] Your GLM balance or plan quota is used up. Check your plan or top up.',
+	'error.http.404':
+		'[{0}] Model or endpoint not found. Check your API Mode, Region, and model id settings.',
+	'error.http.422': '[{0}] Invalid parameters. Check the request parameters.',
+	'error.http.429': '[{0}] Too many requests. Slow down and try again.',
+	'error.http.500': '[{0}] GLM server error. Retry after a short wait.',
+	'error.http.503': '[{0}] GLM service is overloaded. Retry after a short wait.',
+	'error.http.generic': '[{0}] The service returned an error response.',
+
+	// Network errors
+	'error.network.dns':
+		'[{0}] DNS lookup failed. Check your network connection, firewall, proxy settings, or custom Base URL.',
+	'error.network.unreachable':
+		'[{0}] The target is unreachable or refused the connection. Check your Base URL, proxy, network, or firewall.',
+	'error.network.interrupted':
+		'[{0}] The connection was interrupted. Check your network, firewall, or proxy, or try again later.',
+	'error.network.timeout':
+		'[{0}] Connection timed out. Try again later, or check your network, firewall, or proxy.',
+	'error.network.tls':
+		'[{0}] TLS/certificate verification failed. Check your proxy settings, certificates, or custom Base URL.',
+	'error.network.aborted':
+		'[{0}] The request was aborted. If you did not cancel it, check your network or proxy, or try again later.',
+	'error.network.protocol':
+		'[{0}] The HTTP connection or response parsing failed. Check your proxy, custom Base URL, or service response.',
+	'error.network.configuration':
+		'[{0}] The request configuration is invalid. Check your custom Base URL or extension settings.',
+	'error.network.generic':
+		'[{0}] Network request failed. Check your network connection, firewall, proxy settings, or custom Base URL.',
+	'error.unknown': 'GLM request failed: {0}',
+
+	// Error action buttons
+	'error.action.setApiKey': 'Set API Key',
+	'error.action.createApiKey': 'Create API Key',
+	'error.action.viewDetails': 'Show Logs',
+
+	// Lifecycle
+	'extension.activateFailed': 'GLM failed to activate. Run "GLM: Show Logs" for details.',
+
+	// Usage status bar
+	'usage.status.loading': 'Refreshing…',
+	'usage.status.ok.short': '$(sparkle) GLM {0}%',
+	'usage.status.no-data': 'No usage data for this key (Coding Plan required).',
+	'usage.status.auth-error': 'API key invalid. Click to set your key.',
+	'usage.status.network-error': 'Usage unavailable (offline).',
+	'usage.status.server-error': 'Usage request failed. Try again later.',
+	'usage.tooltip.lastUpdated': 'Last updated: {0}',
+	'usage.tooltip.offline': 'Usage unavailable (offline). Showing last data.',
+	'usage.metric.session': 'Session',
+	'usage.metric.weekly': 'Weekly',
+	'usage.metric.webSearches': 'Web Searches',
+	'usage.metric.resetsAt': 'Resets: {0}',
+	'usage.plan.label': 'Plan: {0}',
+	'usage.plan.renewsAt': 'Renews: {0}',
+	'usage.panel.title': 'GLM Usage',
+	'usage.panel.refresh': 'Refresh',
+	'usage.panel.setKey': 'Set API Key',
+	'usage.panel.offline': 'Offline · showing last data',
+	'usage.panel.unavailable': 'Usage unavailable. Use a Coding Plan or Standard API key (no `baseUrl` override) to view details.',
+	'usage.metric.window.session': '5h rolling',
+	'usage.metric.window.weekly': '7-day rolling',
+	'usage.metric.window.webSearches': 'Monthly',
+	'usage.metric.resetsIn': 'Resets in {0}',
+	'usage.panel.lastUpdated': 'Last updated: {0}',
+	'usage.balance.section': 'Account Balance',
+	'usage.balance.available': 'Available',
+	'usage.balance.recharged': 'Recharged',
+	'usage.balance.spent': 'Spent',
+	'usage.balance.gifted': 'Gifted',
+	'usage.balance.frozen': 'Frozen',
+	'usage.balance.packages': 'Token Packages',
+	'usage.recovery.unavailable': 'No usable Coding Plan quota was found for the current key. You can check whether this key has Standard API credit.',
+	'usage.recovery.exhausted': 'Your Coding Plan token quota is exhausted. You can check whether the current key has Standard API credit while you wait for the quota to reset.',
+	'usage.recovery.checkStandard': 'Check Standard API',
+	'usage.recovery.tooltip.unavailable': 'Coding Plan is unavailable for this key. Open GLM Usage to check Standard API.',
+	'usage.recovery.tooltip.exhausted': 'Coding Plan token quota is exhausted. Open GLM Usage to check Standard API.',
+	'usage.recovery.noCredit': 'No usable Standard API credit was found for the current key. API Mode and your key were not changed.',
+	'usage.recovery.checkFailed': 'Standard API balance could not be checked. API Mode and your key were not changed.',
+	'usage.recovery.modeChanged': 'GLM settings or the current key changed before the switch was confirmed. No additional change was made.',
+	'usage.recovery.confirm': 'Switch to Standard API?',
+	'usage.recovery.confirmDetail': 'Detected Standard API credit: {0}. Standard API is pay-as-you-go. This will change API Mode in {1} and refresh the available models. Coding-Plan-only models such as GLM-5.3 may disappear; choose a Standard-compatible model if needed. Balance does not guarantee access to every model.',
+	'usage.recovery.switch': 'Switch to Standard API',
+	'usage.recovery.scope.workspace': 'this workspace',
+	'usage.recovery.scope.user': 'your user settings',
+	'usage.recovery.openSettings': 'Open Settings',
+	'usage.recovery.getStandardKey': 'Get Standard API Key',
+	'usage.recovery.switchFailed': 'GLM could not change API Mode. No change was made.',
+
+	// Usage cards (z.ai-style)
+	'usage.metric.card.session': '5-hour limit',
+	'usage.metric.card.weekly': 'Weekly limit',
+	'usage.metric.card.webSearches': 'Web Searches',
+	'usage.metric.percentUsed': '{0} % Used',
+	'usage.metric.credits': 'Credits {0} / {1}',
+	'usage.metric.resetTime': 'Reset Time: {0}',
+
+	// Banked reset cards (Reset Quota)
+	'usage.reset.panel.title': 'Reset Quota',
+	'usage.reset.timesUnused': '{0} Times Unused',
+	'usage.reset.badge.fiveHour': '5-hour limit · {0} times',
+	'usage.reset.badge.weekly': 'Weekly limit · {0} times',
+	'usage.reset.use.fiveHour': 'Reset 5-hour limit',
+	'usage.reset.use.weekly': 'Reset weekly limit',
+	'usage.reset.command.title': 'Use Reset Quota',
+	'usage.reset.pick.title': 'Which limit should be reset?',
+	'usage.reset.pick.fiveHour': '5-hour limit ({0} available)',
+	'usage.reset.pick.weekly': 'Weekly limit ({0} available)',
+	'usage.reset.confirm': 'Use a Reset Quota?',
+	'usage.reset.confirmDetail.fiveHour': 'This immediately resets your 5-hour limit by redeeming one banked reset card ({0} left after this). The card cannot be restored.',
+	'usage.reset.confirmDetail.weekly': 'This immediately resets your weekly limit by redeeming one banked reset card ({0} left after this). The card cannot be restored.',
+	'usage.reset.action': 'Reset now',
+	'usage.reset.success': 'Reset applied. Usage will refresh in a moment.',
+	'usage.reset.failed': 'Reset Quota could not be applied: {0}',
+	'usage.reset.none': 'No banked resets are available for this window.',
+	'usage.reset.noData': 'No banked resets were found. Refresh usage and try again.',
+
+	// Activity panel
+	'usage.activity.open': 'Activity',
+	'usage.activity.panel.title': 'GLM Activity',
+	'usage.activity.refresh': 'Refresh',
+	'usage.activity.cumulativeTokens': 'Cumulative Tokens',
+	'usage.activity.peakTokens': 'Peak Tokens',
+	'usage.activity.totalDuration': 'Total usage duration',
+	'usage.activity.currentStreak': 'Current streak',
+	'usage.activity.longestStreak': 'Longest streak',
+	'usage.activity.daily': 'Daily',
+	'usage.activity.weekly': 'Weekly',
+	'usage.activity.cumulative': 'Cumulative',
+	'usage.activity.empty': 'No activity yet. Activity appears once the plan is used.',
+	'usage.activity.error': 'Activity could not be loaded: {0}',
+	'usage.activity.loading': 'Loading activity…',
+};
+
+const zh: Record<string, string> = {
+	'model.glm-4.7.detail': '旧版模型',
+	'model.glm-4.7.tooltip': '旧版模型。GLM-4.7 — 20 万上下文，强大的智能体编程与推理。编程计划和标准 API 均可用。',
+	'model.glm-5.detail': '旧版模型',
+	'model.glm-5.tooltip': '旧版模型。GLM-5 — 20 万上下文，先进的推理与编程。仅标准 API 可用。',
+	'model.glm-5.1.detail': '旧版模型',
+	'model.glm-5.1.tooltip': '旧版模型。GLM-5.1 — 最新 GLM-5 系列，20 万上下文。仅标准 API 可用。',
+	'model.glm-5.2.detail': '旗舰编程模型，100 万上下文',
+	'model.glm-5.2.tooltip': 'GLM-5.2 — 旗舰 GLM 编程模型，100 万上下文，可选思考强度。编程计划和标准 API 均可用。',
+	'model.glm-5.3.detail': '默认前沿编程模型，100 万上下文',
+	'model.glm-5.3.tooltip':
+		'GLM-5.3 — 默认前沿编程模型，100 万上下文，必须启用低、高或最高思考强度（默认为最高）。仅编程计划可用。',
+	'model.glm-5.3-flash.detail': '快速多模态模型，100 万上下文',
+	'model.glm-5.3-flash.tooltip':
+		'GLM-5.3-Flash — 快速多模态模型，100 万上下文，原生图片输入，必须启用低、高或最高思考强度（默认为最高）。编程计划和标准 API 均可用。',
+	'model.glm-5.3-flashx.detail': '更快的多模态模型，100 万上下文',
+	'model.glm-5.3-flashx.tooltip':
+		'GLM-5.3-FlashX — 更快的多模态模型，100 万上下文，原生图片输入，必须启用低、高或最高思考强度（默认为最高）。仅标准 API 可用。',
+	'model.glm-4.5-air.detail': '旧版模型',
+	'model.glm-4.5-air.tooltip': '旧版模型。GLM-4.5 Air — 轻量、快速、低成本。两种计划均可用。',
+	'model.custom.detail': '自定义模型',
+
+	'auth.apiKeyRequiredDetail': '请运行“GLM: Set API Key”进行配置。',
+	'auth.prompt': '请输入你的 GLM API Key（格式：id.secret）。编程套餐密钥来自 z.ai；标准密钥来自 GLM 开放平台。',
+	'auth.placeholder': 'your-id.your-secret',
+	'auth.emptyValidation': 'API Key 不能为空',
+	'auth.saved': 'GLM API Key 已保存。',
+	'auth.removed': 'GLM API Key 已删除。',
+	'auth.notConfigured': '尚未配置 GLM API Key。请在命令面板运行“GLM: Set API Key”。',
+
+	'thinking.title': '思考',
+	'thinking.on': '开启',
+	'thinking.off': '关闭',
+	'thinking.on.desc': '启用逐步推理（推荐）',
+	'thinking.off.desc': '关闭推理以获得更快响应',
+
+	'effort.title': '思考强度',
+	'effort.none.label': '关闭',
+	'effort.none.desc': '不进行推理——最快、消耗最低',
+	'effort.low.label': '低',
+	'effort.low.desc': '轻量推理——响应更快、额度消耗更低',
+	'effort.high.label': '高',
+	'effort.high.desc': '均衡推理（推荐）',
+	'effort.max.label': '最高',
+	'effort.max.desc': '最深入的推理——适合复杂编程，消耗更多额度',
+
+	'request.toolsLimitExceeded':
+		'GLM 单次请求最多支持 {0} 个工具，但本次请求包含 {1} 个。请使用 VS Code 的“配置工具”关闭不常用的工具。',
+	'request.retry.rateLimited': 'GLM 请求过于频繁。将在 {0} 秒后重试（{1}/{2}）。',
+	'request.retry.busy': 'GLM 服务繁忙。将在 {0} 秒后重试（{1}/{2}）。',
+
+	// 图片输入
+	'vision.progress.one': '正在使用 GLM-5.3-Flash 分析附带的图片…',
+	'vision.progress.many': '正在使用 GLM-5.3-Flash 分析 {0} 张附带的图片…',
+	'vision.notice.failed': '注意：部分图片分析失败（{0}）；受影响的图片内容已省略。',
+	'vision.error.empty': 'GLM-5.3-Flash 未返回图片描述',
+	'vision.error.unsupportedType': '不支持的图片类型 {0}',
+	'vision.error.tooLarge': '图片大小超过 {0} MB',
+	'vision.error.tooMany': '单次附带的图片超过 {0} 张',
+	'vision.error.noKey': '未配置 GLM 聊天 API Key',
+	'vision.error.timeout': '图片分析超时',
+	'migration.visionCleanupFailed': '旧图片集成的部分数据无法移除。GLM 仍会正常启动；详情请查看日志。',
+
+	'error.http.400': '[{0}] 请求无效。请检查请求参数。',
+	'error.http.401': '[{0}] 身份验证失败。请检查你的 GLM API Key，或为所选套餐创建一个。',
+	'error.http.401.withCreateApiKeyLink': '[{0}] 身份验证失败。请检查你的 GLM API Key，或[创建一个]({1})。',
+	'error.http.402': '[{0}] 你的 GLM 余额或套餐额度已用尽。请检查套餐或充值。',
+	'error.http.404': '[{0}] 未找到模型或接口。请检查 API 模式、区域和模型 ID 设置。',
+	'error.http.422': '[{0}] 参数无效。请检查请求参数。',
+	'error.http.429': '[{0}] 请求过于频繁。请放慢速度后重试。',
+	'error.http.500': '[{0}] GLM 服务器错误。请稍后重试。',
+	'error.http.503': '[{0}] GLM 服务繁忙。请稍后重试。',
+	'error.http.generic': '[{0}] 服务返回了错误响应。',
+
+	'error.network.dns': '[{0}] DNS 解析失败。请检查网络连接、防火墙、代理设置或自定义 Base URL。',
+	'error.network.unreachable': '[{0}] 目标不可达或拒绝连接。请检查 Base URL、代理、网络或防火墙。',
+	'error.network.interrupted': '[{0}] 连接中断。请检查网络、防火墙或代理，或稍后重试。',
+	'error.network.timeout': '[{0}] 连接超时。请稍后重试，或检查网络、防火墙或代理。',
+	'error.network.tls': '[{0}] TLS/证书校验失败。请检查代理设置、证书或自定义 Base URL。',
+	'error.network.aborted': '[{0}] 请求已中止。若非你主动取消，请检查网络或代理，或稍后重试。',
+	'error.network.protocol': '[{0}] HTTP 连接或响应解析失败。请检查代理、自定义 Base URL 或服务响应。',
+	'error.network.configuration': '[{0}] 请求配置无效。请检查自定义 Base URL 或扩展设置。',
+	'error.network.generic': '[{0}] 网络请求失败。请检查网络连接、防火墙、代理设置或自定义 Base URL。',
+	'error.unknown': 'GLM 请求失败：{0}',
+
+	'error.action.setApiKey': '设置 API Key',
+	'error.action.createApiKey': '创建 API Key',
+	'error.action.viewDetails': '查看日志',
+
+	'extension.activateFailed': 'GLM 激活失败。请运行“GLM: Show Logs”查看详情。',
+
+	// 用量状态栏
+	'usage.status.loading': '刷新中…',
+	'usage.status.ok.short': '$(sparkle) GLM {0}%',
+	'usage.status.no-data': '此密钥暂无用量数据（需要编程计划）。',
+	'usage.status.auth-error': 'API 密钥无效。点击设置密钥。',
+	'usage.status.network-error': '无法获取用量（离线）。',
+	'usage.status.server-error': '用量请求失败，请稍后重试。',
+	'usage.tooltip.lastUpdated': '最后更新：{0}',
+	'usage.tooltip.offline': '无法获取用量（离线）。显示上次数据。',
+	'usage.metric.session': '本次会话',
+	'usage.metric.weekly': '本周',
+	'usage.metric.webSearches': '网页搜索',
+	'usage.metric.resetsAt': '重置时间：{0}',
+	'usage.plan.label': '套餐：{0}',
+	'usage.plan.renewsAt': '续期时间：{0}',
+	'usage.panel.title': 'GLM 用量',
+	'usage.panel.refresh': '刷新',
+	'usage.panel.setKey': '设置 API 密钥',
+	'usage.panel.offline': '离线 · 显示上次数据',
+	'usage.panel.unavailable': '暂无用量数据。请使用编程计划或标准 API 密钥（未配置 baseUrl 覆盖时）以查看详情。',
+	'usage.metric.window.session': '5 小时滚动',
+	'usage.metric.window.weekly': '7 天滚动',
+	'usage.metric.window.webSearches': '每月',
+	'usage.metric.resetsIn': '{0} 后重置',
+	'usage.panel.lastUpdated': '最后更新：{0}',
+	'usage.balance.section': '账户余额',
+	'usage.balance.available': '可用余额',
+	'usage.balance.recharged': '累计充值',
+	'usage.balance.spent': '累计消耗',
+	'usage.balance.gifted': '赠送金额',
+	'usage.balance.frozen': '冻结金额',
+	'usage.balance.packages': '资源包',
+	'usage.recovery.unavailable': '当前密钥未找到可用的编程计划额度。你可以检查此密钥是否有标准 API 余额。',
+	'usage.recovery.exhausted': '编程计划的 token 额度已用尽。在等待额度重置时，你可以检查当前密钥是否有标准 API 余额。',
+	'usage.recovery.checkStandard': '检查标准 API',
+	'usage.recovery.tooltip.unavailable': '当前密钥不可用于编程计划。打开 GLM 用量详情以检查标准 API。',
+	'usage.recovery.tooltip.exhausted': '编程计划的 token 额度已用尽。打开 GLM 用量详情以检查标准 API。',
+	'usage.recovery.noCredit': '当前密钥未找到可用的标准 API 余额。API 模式和密钥均未更改。',
+	'usage.recovery.checkFailed': '无法检查标准 API 余额。API 模式和密钥均未更改。',
+	'usage.recovery.modeChanged': '确认切换前 GLM 设置或当前密钥已发生变化，未执行其他更改。',
+	'usage.recovery.confirm': '切换到标准 API？',
+	'usage.recovery.confirmDetail': '检测到标准 API 额度：{0}。标准 API 按量付费。此操作将在{1}中更改 API 模式，并刷新可用模型。GLM-5.3 等仅编程计划可用的模型可能会消失；如有需要，请选择支持标准 API 的模型。余额不代表一定有权限访问所有模型。',
+	'usage.recovery.switch': '切换到标准 API',
+	'usage.recovery.scope.workspace': '当前工作区',
+	'usage.recovery.scope.user': '用户设置',
+	'usage.recovery.openSettings': '打开设置',
+	'usage.recovery.getStandardKey': '获取标准 API 密钥',
+	'usage.recovery.switchFailed': 'GLM 无法更改 API 模式，未执行任何更改。',
+
+	// 用量卡片（与 z.ai 官网一致）
+	'usage.metric.card.session': '5 小时额度',
+	'usage.metric.card.weekly': '周额度',
+	'usage.metric.card.webSearches': '网页搜索',
+	'usage.metric.percentUsed': '{0} % 已使用',
+	'usage.metric.credits': '额度 {0} / {1}',
+	'usage.metric.resetTime': '重置时间：{0}',
+
+	// 额度重置卡（Reset Quota）
+	'usage.reset.panel.title': '额度重置',
+	'usage.reset.timesUnused': '{0} 次未使用',
+	'usage.reset.badge.fiveHour': '5 小时额度 · {0} 次',
+	'usage.reset.badge.weekly': '周额度 · {0} 次',
+	'usage.reset.use.fiveHour': '重置 5 小时额度',
+	'usage.reset.use.weekly': '重置周额度',
+	'usage.reset.command.title': '使用额度重置',
+	'usage.reset.pick.title': '要重置哪个额度？',
+	'usage.reset.pick.fiveHour': '5 小时额度（可用 {0} 次）',
+	'usage.reset.pick.weekly': '周额度（可用 {0} 次）',
+	'usage.reset.confirm': '使用额度重置？',
+	'usage.reset.confirmDetail.fiveHour': '将立即消耗一张额度重置卡来重置 5 小时额度（此后剩余 {0} 张）。重置卡无法恢复。',
+	'usage.reset.confirmDetail.weekly': '将立即消耗一张额度重置卡来重置周额度（此后剩余 {0} 张）。重置卡无法恢复。',
+	'usage.reset.action': '立即重置',
+	'usage.reset.success': '重置已生效。用量稍后将刷新。',
+	'usage.reset.failed': '额度重置失败：{0}',
+	'usage.reset.none': '该窗口暂无可用的额度重置。',
+	'usage.reset.noData': '未找到额度重置卡。请刷新用量后重试。',
+
+	// 活动面板
+	'usage.activity.open': '活动',
+	'usage.activity.panel.title': 'GLM 活动',
+	'usage.activity.refresh': '刷新',
+	'usage.activity.cumulativeTokens': '累计 Token',
+	'usage.activity.peakTokens': '峰值 Token',
+	'usage.activity.totalDuration': '累计使用时长',
+	'usage.activity.currentStreak': '当前连续天数',
+	'usage.activity.longestStreak': '最长连续天数',
+	'usage.activity.daily': '每日',
+	'usage.activity.weekly': '每周',
+	'usage.activity.cumulative': '累计',
+	'usage.activity.empty': '暂无活动数据。使用套餐后将显示活动。',
+	'usage.activity.error': '无法加载活动数据：{0}',
+	'usage.activity.loading': '正在加载活动…',
+};
+
+function isZh(): boolean {
+	return vscode.env.language.toLowerCase() === 'zh-cn';
+}
+
+/** Translate `key`, substituting `{0}`, `{1}`, … with `args`. */
+export function t(key: string, ...args: string[]): string {
+	const dict = isZh() ? zh : en;
+	let text = dict[key] ?? en[key];
+	if (text === undefined) {
+		return key;
+	}
+	for (let i = 0; i < args.length; i++) {
+		text = text.replaceAll(`{${i}}`, String(args[i]));
+	}
+	return text;
+}

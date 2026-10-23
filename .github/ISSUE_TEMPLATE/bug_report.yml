@@ -1,0 +1,73 @@
+name: Bug report
+description: Report something that is not working as expected.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in the details below so we
+        can reproduce and fix the issue.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you start
+      options:
+        - label: I am on the latest version of the extension.
+          required: true
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, and what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps that trigger the bug.
+      placeholder: |
+        1. Set API mode to '...'
+        2. Pick model '...'
+        3. Send '...'
+        4. See error
+    validations:
+      required: true
+  - type: dropdown
+    id: api-mode
+    attributes:
+      label: API mode
+      options:
+        - Coding Plan
+        - Standard (International / z.ai)
+        - Standard (Mainland China / bigmodel.cn)
+        - Custom baseUrl / proxy
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Which GLM model did you select in the picker?
+      placeholder: GLM-5.2
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Enable `glm-copilot.debugLogging`, reproduce, then paste the output of
+        **GLM: Show Logs**. Remove your API key and any private content first.
+      render: shell
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Extension version, VS Code version, and operating system.
+      placeholder: "Extension 0.2.1 · VS Code 1.120 · macOS 15"
+    validations:
+      required: true

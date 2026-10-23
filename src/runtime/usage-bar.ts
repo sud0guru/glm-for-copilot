@@ -1,0 +1,694 @@
+import * as vscode from 'vscode';
+import { getApiMode, getBaseUrlOverride, getRegion, getShowUsageStatusBar, getUsageRefreshIntervalMinutes } from '../config';
+import { API_KEY_SECRET, CONFIG_SECTION, USAGE_CACHE_STALE_MS, USAGE_MANUAL_DEBOUNCE_MS } from '../consts';
+import { resolveStandardKeyPageUrl } from '../endpoint';
+import { t } from '../i18n';
+import { logger } from '../logger';
+import type { ApiMode, IAuthManager, ResetCardWindow, ResetQuota, UsageSnapshot } from '../types';
+import { isAbortError, GLMRequestError } from '../client/errors';
+import type { IUsageClient } from '../client/usage';
+import { buildUsageMessage, type UsagePanelMessage, type UsageRecoveryReason } from './usage-detail-html';
+import { UsageDetailPanel } from './usage-detail-panel';
+import { ActivityPanel } from './activity-panel';
+import { formatAmount, formatTokens } from './format';
+import { usagePanelStrings } from './usage-strings';
+
+/**
+ * Status-bar item showing GLM usage/balance. Coding Plan shows session/weekly/web-search quota;
+ * Standard API shows cash balance + token packages. Both apiModes × both regions are supported.
+ * Constructed inside `registerProvider` (where AuthManager lives). Registers its own refresh command.
+ *
+ * Gate: the item shows AND fetches only when no `baseUrl` override is set, a key is present, and the
+ * user has not opted out via `showUsageStatusBar`.
+ */
+export class UsageStatusBar implements vscode.Disposable {
+	private readonly item: vscode.StatusBarItem;
+	private readonly client: IUsageClient;
+	private readonly auth: IAuthManager;
+
+	private refreshPromise: Promise<void> | null = null;
+	private lastFetchAt = 0;
+	private lastOk: UsageSnapshot | null = null;
+	private intervalHandle: ReturnType<typeof setInterval> | null = null;
+	private controller: AbortController | null = null;
+	private recoveryController: AbortController | null = null;
+	private recoveryPromise: Promise<void> | null = null;
+	private readonly _onDidChange = new vscode.EventEmitter<UsagePanelMessage | null>();
+	readonly onDidChangeSnapshot = this._onDidChange.event;
+	private lastRendered: UsagePanelMessage | null = null;
+
+	constructor(
+		context: vscode.ExtensionContext,
+		auth: IAuthManager,
+		client: IUsageClient,
+	) {
+		this.auth = auth;
+		this.client = client;
+		this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 50);
+		this.item.command = 'glm-copilot.openUsageDetail';
+		this.item.name = 'GLM Usage';
+
+		context.subscriptions.push(
+			this.item,
+			vscode.commands.registerCommand('glm-copilot.refreshUsage', () => {
+				void this.refresh();
+			}),
+			vscode.commands.registerCommand('glm-copilot.openUsageDetail', () => {
+				UsageDetailPanel.createOrShow(context, this);
+			}),
+			vscode.commands.registerCommand('glm-copilot.useResetQuota', () => {
+				void this.commandUseResetQuota();
+			}),
+			vscode.commands.registerCommand('glm-copilot.openActivity', () => {
+				ActivityPanel.createOrShow(context, this.client, this.auth);
+			}),
+			vscode.workspace.onDidChangeConfiguration((event) => {
+				if (event.affectsConfiguration('glm-copilot')) {
+					void this.onConfigOrKeyChange().catch((error) => logger.warn('Usage gate check failed', error));
+				}
+			}),
+			context.secrets.onDidChange((event) => {
+				if (event.key === API_KEY_SECRET) {
+					void this.onConfigOrKeyChange().catch((error) => logger.warn('Usage gate check failed', error));
+				}
+			}),
+		);
+
+		// Initial gate evaluation: show + first fetch + arm interval if gate passes.
+		void this.onConfigOrKeyChange().catch((error) => logger.warn('Usage gate check failed', error));
+	}
+
+	/** Manual + interval entry point. Serialized + debounced. */
+	refresh(): Promise<void> {
+		if (this.refreshPromise) {
+			return this.refreshPromise;
+		}
+		const now = Date.now();
+		if (now - this.lastFetchAt < USAGE_MANUAL_DEBOUNCE_MS) {
+			return Promise.resolve();
+		}
+		const refresh = this.runRefresh()
+			.catch((error) => logger.warn('Usage refresh failed', error))
+			.finally(() => {
+				if (this.refreshPromise !== refresh) {
+					return;
+				}
+				this.refreshPromise = null;
+			});
+		this.refreshPromise = refresh;
+		return this.refreshPromise;
+	}
+
+	/** Check the current key for Standard API credit and switch only after explicit consent. */
+	checkStandardApi(): Promise<void> {		if (this.recoveryPromise) {
+			return this.recoveryPromise;
+		}
+		const recovery = this.runStandardApiCheck()
+			.catch(async (error) => {
+				if (isAbortError(error)) {
+					return;
+				}
+				logger.warn('Standard API recovery failed', error);
+				await this.showCheckFailure();
+			})
+			.finally(() => {
+				if (this.recoveryPromise === recovery) {
+					this.recoveryPromise = null;
+				}
+			});
+		this.recoveryPromise = recovery;
+		return recovery;
+	}
+
+	/**
+	 * Redeem one banked reset card for `resetType`. Uses the earliest-expiring card, asks for
+	 * explicit confirmation (cards cannot be restored), then redeems and force-refreshes usage.
+	 */
+	async useResetQuota(resetType: ResetCardWindow): Promise<void> {
+		const gate = await this.evaluateGate();
+		if (!gate.passed) {
+			await vscode.window.showWarningMessage(t('usage.panel.unavailable'));
+			return;
+		}
+		const quota = await this.loadResetQuota(gate.apiKey);
+		if (!quota) {
+			await vscode.window.showWarningMessage(t('usage.reset.noData'));
+			return;
+		}
+		const cards = resetType === 'WEEK' ? quota.weekCards : quota.fiveHourCards;
+		if (cards.length === 0) {
+			await vscode.window.showWarningMessage(t('usage.reset.none'));
+			return;
+		}
+		const card = cards[0];
+		const action = t('usage.reset.action');
+		const detailKey = resetType === 'WEEK' ? 'usage.reset.confirmDetail.weekly' : 'usage.reset.confirmDetail.fiveHour';
+		const choice = await vscode.window.showWarningMessage(
+			t('usage.reset.confirm'),
+			{ modal: true, detail: t(detailKey, String(cards.length - 1)) },
+			action,
+		);
+		if (choice !== action) {
+			return;
+		}
+		try {
+			await this.client.useResetCard(gate.apiKey, card);
+		} catch (error) {
+			if (isAbortError(error)) {
+				return;
+			}
+			logger.warn('GLM reset card redeem failed', error);
+			const reason = error instanceof GLMRequestError
+				? (error.serverMessage ?? error.userSummary)
+				: String(error);
+			await vscode.window.showErrorMessage(t('usage.reset.failed', reason));
+			return;
+		}
+		await vscode.window.showInformationMessage(t('usage.reset.success'));
+		this.lastFetchAt = 0;
+		await this.refresh();
+	}
+
+	/**
+	 * Command-palette entry: pick a window (quick pick when both have cards; direct when only
+	 * one), then delegate to {@link useResetQuota} for confirmation + redemption.
+	 */
+	private async commandUseResetQuota(): Promise<void> {
+		const gate = await this.evaluateGate();
+		if (!gate.passed) {
+			await vscode.window.showWarningMessage(t('usage.panel.unavailable'));
+			return;
+		}
+		const quota = await this.loadResetQuota(gate.apiKey);
+		if (!quota) {
+			await vscode.window.showWarningMessage(t('usage.reset.noData'));
+			return;
+		}
+		const fiveHour = quota.fiveHourCards.length;
+		const week = quota.weekCards.length;
+		if (fiveHour + week === 0) {
+			await vscode.window.showWarningMessage(t('usage.reset.none'));
+			return;
+		}
+		let resetType: ResetCardWindow | undefined;
+		if (fiveHour > 0 && week > 0) {
+			const pick = await vscode.window.showQuickPick(
+				[
+					{ label: t('usage.reset.pick.fiveHour', String(fiveHour)), resetType: 'FIVE_HOUR' as ResetCardWindow },
+					{ label: t('usage.reset.pick.weekly', String(week)), resetType: 'WEEK' as ResetCardWindow },
+				],
+				{ placeHolder: t('usage.reset.pick.title') },
+			);
+			resetType = pick?.resetType;
+		} else {
+			resetType = week > 0 ? 'WEEK' : 'FIVE_HOUR';
+		}
+		if (!resetType) {
+			return;
+		}
+		await this.useResetQuota(resetType);
+	}
+
+	/**
+	 * Resolve the banked reset cards for the current key: the cached `ok` snapshot when fresh
+	 * (< 1h), otherwise a fresh fetch (which also re-renders the bar). Returns undefined when no
+	 * card data can be obtained.
+	 */
+	private async loadResetQuota(apiKey: string): Promise<ResetQuota | undefined> {
+		if (getApiMode() !== 'coding-plan') {
+			return undefined;
+		}
+		if (this.lastOk?.resetQuota && Date.now() - this.lastOk.fetchedAt < USAGE_CACHE_STALE_MS) {
+			return this.lastOk.resetQuota;
+		}
+		try {
+			const snapshot = await this.fetchUsage(apiKey);
+			if (snapshot.status === 'ok') {
+				this.lastOk = snapshot;
+				this.render(snapshot);
+				return snapshot.resetQuota;
+			}
+		} catch (error) {
+			if (isAbortError(error)) {
+				return undefined;
+			}
+			logger.warn('GLM reset quota lookup failed', error);
+		}
+		return undefined;
+	}
+
+	private async runStandardApiCheck(): Promise<void> {
+		if (getApiMode() !== 'coding-plan' || getBaseUrlOverride() !== '') {
+			await vscode.window.showWarningMessage(t('usage.recovery.modeChanged'));
+			return;
+		}
+		const region = getRegion();
+		const gate = await this.evaluateGate();
+		if (!gate.passed) {
+			await this.showNoStandardCredit();
+			return;
+		}
+
+		const controller = new AbortController();
+		this.recoveryController = controller;
+		let snapshot: UsageSnapshot;
+		try {
+			snapshot = await this.client.fetchBalance(gate.apiKey, controller.signal);
+		} finally {
+			if (this.recoveryController === controller) {
+				this.recoveryController = null;
+			}
+		}
+		if (controller.signal.aborted) {
+			return;
+		}
+
+		const credit = summarizeStandardCredit(snapshot);
+		if (!credit) {
+			if (snapshot.status === 'network-error' || snapshot.status === 'server-error') {
+				await this.showCheckFailure();
+			} else {
+				await this.showNoStandardCredit();
+			}
+			return;
+		}
+
+		const configuration = vscode.workspace.getConfiguration(CONFIG_SECTION);
+		const workspaceScoped = configuration.inspect<ApiMode>('apiMode')?.workspaceValue !== undefined;
+		const target = workspaceScoped
+			? vscode.ConfigurationTarget.Workspace
+			: vscode.ConfigurationTarget.Global;
+		const scope = t(workspaceScoped
+			? 'usage.recovery.scope.workspace'
+			: 'usage.recovery.scope.user');
+		const switchAction = t('usage.recovery.switch');
+		const choice = await vscode.window.showWarningMessage(
+			t('usage.recovery.confirm'),
+			{
+				modal: true,
+				detail: t('usage.recovery.confirmDetail', credit, scope),
+			},
+			switchAction,
+		);
+		if (choice !== switchAction) {
+			return;
+		}
+		const currentGate = await this.evaluateGate();
+		const currentWorkspaceScoped = vscode.workspace
+			.getConfiguration(CONFIG_SECTION)
+			.inspect<ApiMode>('apiMode')?.workspaceValue !== undefined;
+		if (
+			getApiMode() !== 'coding-plan' ||
+			getBaseUrlOverride() !== '' ||
+			getRegion() !== region ||
+			!currentGate.passed ||
+			currentGate.apiKey !== gate.apiKey ||
+			currentWorkspaceScoped !== workspaceScoped
+		) {
+			await vscode.window.showWarningMessage(t('usage.recovery.modeChanged'));
+			return;
+		}
+		try {
+			await configuration.update('apiMode', 'standard', target);
+		} catch (error) {
+			logger.warn('Failed to switch GLM API Mode to Standard', error);
+			const showLogs = t('error.action.viewDetails');
+			const failureChoice = await vscode.window.showErrorMessage(
+				t('usage.recovery.switchFailed'),
+				showLogs,
+			);
+			if (failureChoice === showLogs) {
+				logger.show();
+			}
+		}
+	}
+
+	private async showNoStandardCredit(): Promise<void> {
+		const getKey = t('usage.recovery.getStandardKey');
+		const openSettings = t('usage.recovery.openSettings');
+		const choice = await vscode.window.showWarningMessage(
+			t('usage.recovery.noCredit'),
+			getKey,
+			openSettings,
+		);
+		if (choice === getKey) {
+			await vscode.env.openExternal(vscode.Uri.parse(resolveStandardKeyPageUrl()));
+		} else if (choice === openSettings) {
+			await vscode.commands.executeCommand('workbench.action.openSettings', `${CONFIG_SECTION}.apiMode`);
+		}
+	}
+
+	private async showCheckFailure(): Promise<void> {
+		const showLogs = t('error.action.viewDetails');
+		const openSettings = t('usage.recovery.openSettings');
+		const choice = await vscode.window.showWarningMessage(
+			t('usage.recovery.checkFailed'),
+			showLogs,
+			openSettings,
+		);
+		if (choice === showLogs) {
+			logger.show();
+		} else if (choice === openSettings) {
+			await vscode.commands.executeCommand('workbench.action.openSettings', `${CONFIG_SECTION}.apiMode`);
+		}
+	}
+
+	/**
+	 * Evaluate the gate, fetch usage/balance, and render the result. Aborts any in-flight fetch.
+	 * On gate failure: hide the bar + stop the interval. On fetch error: render a network-error
+	 * snapshot (unless the error is an abort, which is expected during cancellation).
+	 */
+	private async runRefresh(): Promise<void> {
+		const gate = await this.evaluateGate();
+		if (!gate.passed) {
+			this.item.hide();
+			this.stopInterval();
+			this.lastRendered = null;
+			this._onDidChange.fire(null);
+			return;
+		}
+		this.lastFetchAt = Date.now();
+		this.render({ status: 'loading', metrics: [], fetchedAt: Date.now() });
+		this.controller?.abort();
+		const controller = new AbortController();
+		this.controller = controller;
+		try {
+			const snapshot = await this.fetchUsage(gate.apiKey, controller.signal);
+			if (snapshot.status === 'ok') {
+				this.lastOk = snapshot;
+			}
+			this.render(snapshot);
+		} catch (error) {
+			if (isAbortError(error)) {
+				logger.warn('Usage fetch aborted');
+				return;
+			}
+			logger.warn('Usage fetch threw', error);
+			this.render({ status: 'network-error', metrics: [], fetchedAt: Date.now() });
+		}
+	}
+
+	/**
+	 * Decide whether the status bar should be visible. Passes when no `baseUrl` override is set,
+	 * the user has opted in (`showUsageStatusBar`), and an API key is present. Both apiModes ×
+	 * both regions are eligible — the usage/balance endpoints exist on both stations.
+	 */
+	private async evaluateGate(): Promise<{ passed: true; apiKey: string } | { passed: false }> {
+		// Both apiModes (Coding Plan + Standard API) and both regions (z.ai + bigmodel.cn) are
+		// supported. The usage/balance endpoints exist on both stations' biz gateways and share
+		// the same JSON shape. Only gate on baseUrl override, opt-in, and key presence.
+		if (
+			getBaseUrlOverride() !== '' ||
+			!getShowUsageStatusBar()
+		) {
+			return { passed: false };
+		}
+		const apiKey = await this.auth.getApiKey();
+		if (!apiKey) {
+			return { passed: false };
+		}
+		return { passed: true, apiKey };
+	}
+
+	/** Route to fetchSnapshot (Coding Plan) or fetchBalance (Standard API) based on apiMode. */
+	private fetchUsage(apiKey: string, signal?: AbortSignal): Promise<UsageSnapshot> {
+		return getApiMode() === 'standard'
+			? this.client.fetchBalance(apiKey, signal)
+			: this.client.fetchSnapshot(apiKey, signal);
+	}
+
+	/**
+	 * Render a snapshot to the status bar (text + tooltip + background) and fire the panel message.
+	 * On network/server error with a fresh cache (< 1h), falls back to the last `ok` snapshot
+	 * marked `offline`. Resets the warning background; ok-state renderers may set it.
+	 */
+	private render(snapshot: UsageSnapshot): void {
+		const now = Date.now();
+		const cacheUsable = this.lastOk && now - this.lastOk.fetchedAt < USAGE_CACHE_STALE_MS;
+		let offline = false;
+		const sourceRecovery = standardRecoveryReason(snapshot);
+
+		// Reset warning background by default; ok-state renderers may set it for critical values.
+		this.item.backgroundColor = undefined;
+
+		let effective: UsageSnapshot = snapshot;
+		if (
+			(snapshot.status === 'network-error' || snapshot.status === 'server-error') &&
+			cacheUsable &&
+			sourceRecovery !== 'coding-plan-unavailable'
+		) {
+			effective = { ...this.lastOk! };
+			offline = true;
+		}
+		const recoveryReason = sourceRecovery ?? (offline ? undefined : standardRecoveryReason(effective));
+
+		switch (effective.status) {
+			case 'loading':
+				this.item.text = '$(pulse) GLM';
+				this.item.tooltip = t('usage.status.loading');
+				this.item.show();
+				break;
+			case 'ok':
+				this.renderOkBar(effective, offline, recoveryReason);
+				break;
+			case 'no-data':
+				this.item.text = '$(dash) GLM';
+				this.item.tooltip = recoveryReason === 'coding-plan-unavailable'
+					? t('usage.recovery.tooltip.unavailable')
+					: t('usage.status.no-data');
+				this.item.show();
+				break;
+			case 'auth-error':
+				this.item.text = '$(warning) GLM';
+				this.item.tooltip = t('usage.status.auth-error');
+				this.item.show();
+				break;
+			case 'network-error':
+			case 'server-error':
+				this.item.text = snapshot.status === 'network-error' ? '$(plug) GLM' : '$(warning) GLM';
+				this.item.tooltip = recoveryReason === 'coding-plan-unavailable'
+					? t('usage.recovery.tooltip.unavailable')
+					: snapshot.status === 'network-error'
+						? t('usage.status.network-error')
+						: t('usage.status.server-error');
+				this.item.show();
+				break;
+		}
+
+		this.fireEffective(effective, offline, recoveryReason);
+	}
+
+	/** Status-bar rendering for the ok state (text + tooltip). Pane gets the structured message via fireEffective. */
+	private renderOkBar(snapshot: UsageSnapshot, offline: boolean, recoveryReason?: UsageRecoveryReason): void {
+		if (snapshot.balance) {
+			this.renderOkBarBalance(snapshot, offline);
+			return;
+		}
+		const primary = snapshot.metrics.find((m) => m.kind === 'session') ?? snapshot.metrics[0];
+		if (!primary) {
+			this.item.text = '$(sparkle) GLM';
+		} else if (primary.kind === 'web-searches') {
+			this.item.text = `$(sparkle) GLM ${primary.used} / ${primary.limit}`;
+		} else {
+			this.item.text = t('usage.status.ok.short', String(primary.used));
+		}
+		const lines: string[] = [];
+		if (snapshot.planName) {
+			lines.push(t('usage.plan.label', snapshot.planName));
+		}
+		if (snapshot.renewsAt) {
+			lines.push(t('usage.plan.renewsAt', snapshot.renewsAt));
+		}
+		for (const metric of snapshot.metrics) {
+			const label =
+				metric.kind === 'session' ? t('usage.metric.session') :
+				metric.kind === 'weekly' ? t('usage.metric.weekly') :
+				t('usage.metric.webSearches');
+			const detail = metric.kind === 'web-searches'
+				? `${metric.used} / ${metric.limit}`
+				: `${metric.used}%`;
+			lines.push(`${label}: ${detail}`);
+			if (metric.resetsAt) {
+				lines.push('  ' + t('usage.metric.resetsAt', new Date(metric.resetsAt).toLocaleString()));
+			}
+		}
+		lines.push(t('usage.tooltip.lastUpdated', new Date(snapshot.fetchedAt).toLocaleTimeString()));
+		if (offline) {
+			lines.push(t('usage.tooltip.offline'));
+		}
+		if (recoveryReason === 'coding-plan-exhausted') {
+			lines.push(t('usage.recovery.tooltip.exhausted'));
+		}
+		this.item.tooltip = lines.join('\n');
+		// Critical: any percentage metric at 100% → error background.
+		const exhausted = snapshot.metrics.some((m) => m.limit > 0 && m.used >= m.limit);
+		this.item.backgroundColor = exhausted
+			? new vscode.ThemeColor('statusBarItem.errorBackground')
+			: undefined;
+		this.item.show();
+	}
+
+	/** Status-bar rendering for the Standard API balance (cash + token packages). */
+	private renderOkBarBalance(snapshot: UsageSnapshot, offline: boolean): void {
+		const bal = snapshot.balance!;
+		const cash = bal.availableCash;
+		const packages = bal.tokenPackages;
+		const totalTokens = packages.reduce((sum, p) => sum + p.remainingTokens * p.magnitude, 0);
+		const currency = getRegion() === 'china' ? '¥' : '$';
+
+		if (cash !== undefined && totalTokens > 0) {
+			this.item.text = `$(wallet) GLM ${currency}${formatAmount(cash)} · ${formatTokens(totalTokens)}`;
+		} else if (cash !== undefined) {
+			this.item.text = `$(wallet) GLM ${currency}${formatAmount(cash)}`;
+		} else if (totalTokens > 0) {
+			this.item.text = `$(sparkle) GLM ${formatTokens(totalTokens)}`;
+		} else {
+			this.item.text = '$(dash) GLM';
+		}
+
+		const lines: string[] = [];
+		if (cash !== undefined) {
+			lines.push(`${t('usage.balance.available')}: ${currency}${formatAmount(cash)}`);
+		}
+		if (bal.totalRecharged !== undefined) {
+			lines.push(`${t('usage.balance.recharged')}: ${currency}${formatAmount(bal.totalRecharged)}`);
+		}
+		if (bal.giftedAmount !== undefined && bal.giftedAmount > 0) {
+			lines.push(`${t('usage.balance.gifted')}: ${currency}${formatAmount(bal.giftedAmount)}`);
+		}
+		if (bal.totalSpent !== undefined) {
+			lines.push(`${t('usage.balance.spent')}: ${currency}${formatAmount(bal.totalSpent)}`);
+		}
+		if (bal.frozenAmount !== undefined && bal.frozenAmount > 0) {
+			lines.push(`${t('usage.balance.frozen')}: ${currency}${formatAmount(bal.frozenAmount)}`);
+		}
+		for (const pkg of packages) {
+			const tokens = pkg.remainingTokens * pkg.magnitude;
+			lines.push(`${pkg.name}: ${formatTokens(tokens)}`);
+		}
+		lines.push(t('usage.tooltip.lastUpdated', new Date(snapshot.fetchedAt).toLocaleTimeString()));
+		if (offline) {
+			lines.push(t('usage.tooltip.offline'));
+		}
+		this.item.tooltip = lines.join('\n');
+		// Critical: no usable credit (cash absent/≤0 AND no token packages) → error background.
+		const broke = (cash === undefined || cash <= 0) && totalTokens <= 0;
+		this.item.backgroundColor = broke
+			? new vscode.ThemeColor('statusBarItem.errorBackground')
+			: undefined;
+		this.item.show();
+	}
+
+	/**
+	 * Re-evaluate the gate after settings or the stored key change. Aborts any in-flight fetch,
+	 * drops the cached snapshot from the previous key/region, and bypasses the manual debounce so
+	 * the next render reflects the new configuration immediately.
+	 */
+	private async onConfigOrKeyChange(): Promise<void> {
+		this.controller?.abort();
+		this.recoveryController?.abort();
+		this.refreshPromise = null;
+		this.lastOk = null;
+		const gate = await this.evaluateGate();
+		if (!gate.passed) {
+			this.item.hide();
+			this.stopInterval();
+			this.lastRendered = null;
+			this._onDidChange.fire(null);
+			return;
+		}
+		this.stopInterval();
+		this.startInterval();
+		this.lastFetchAt = 0;
+		void this.refresh();
+	}
+
+	/** Arm the auto-refresh interval from `getUsageRefreshIntervalMinutes`; replaces any existing handle. */
+	private startInterval(): void {
+		const minutes = getUsageRefreshIntervalMinutes();
+		this.intervalHandle = setInterval(() => {
+			void this.refresh();
+		}, minutes * 60_000);
+	}
+
+	/** Clear the auto-refresh interval if armed. */
+	private stopInterval(): void {
+		if (this.intervalHandle !== null) {
+			clearInterval(this.intervalHandle);
+			this.intervalHandle = null;
+		}
+	}
+
+	/** Dispose the status bar item, abort any in-flight fetch, and stop auto-refresh. */
+	dispose(): void {
+		this.stopInterval();
+		this.controller?.abort();
+		this.recoveryController?.abort();
+		this.item.dispose();
+		this._onDidChange.dispose();
+	}
+
+	/** Latest effective snapshot message (post-cache-fallback), or null before first render / after gate fail. */
+	getSnapshot(): UsagePanelMessage | null {
+		return this.lastRendered;
+	}
+
+	/** Build a UsagePanelMessage from the effective state and fire the emitter + cache it. */
+	private fireEffective(snapshot: UsageSnapshot, offline: boolean, recoveryReason?: UsageRecoveryReason): void {
+		const currency = getRegion() === 'china' ? '¥' : '$';
+		const message = buildUsageMessage(
+			snapshot,
+			offline,
+			usagePanelStrings(),
+			currentThemeKind(),
+			currency,
+			recoveryReason,
+		);
+		this.lastRendered = message;
+		this._onDidChange.fire(message);
+	}
+}
+
+function standardRecoveryReason(snapshot: UsageSnapshot): UsageRecoveryReason | undefined {
+	if (getApiMode() !== 'coding-plan' || getBaseUrlOverride() !== '') {
+		return undefined;
+	}
+	if (snapshot.failureReason === 'coding-plan-unavailable' || snapshot.status === 'no-data') {
+		return 'coding-plan-unavailable';
+	}
+	if (
+		snapshot.status === 'ok' &&
+		snapshot.metrics.some((metric) =>
+			(metric.kind === 'session' || metric.kind === 'weekly') &&
+			metric.limit > 0 &&
+			metric.used >= metric.limit
+		)
+	) {
+		return 'coding-plan-exhausted';
+	}
+	return undefined;
+}
+
+function summarizeStandardCredit(snapshot: UsageSnapshot): string | undefined {
+	if (snapshot.status !== 'ok' || !snapshot.balance) {
+		return undefined;
+	}
+	const parts: string[] = [];
+	if (snapshot.balance.availableCash !== undefined && snapshot.balance.availableCash > 0) {
+		const currency = getRegion() === 'china' ? '¥' : '$';
+		parts.push(`${currency}${formatAmount(snapshot.balance.availableCash)}`);
+	}
+	const totalTokens = snapshot.balance.tokenPackages.reduce(
+		(sum, pkg) => sum + Math.max(0, pkg.remainingTokens * pkg.magnitude),
+		0,
+	);
+	if (totalTokens > 0) {
+		parts.push(formatTokens(totalTokens));
+	}
+	return parts.length > 0 ? parts.join(' · ') : undefined;
+}
+
+/** Map the active VS Code color theme to a light/dark token for the detail panel. */
+function currentThemeKind(): 'dark' | 'light' {
+	return vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark ? 'dark' : 'light';
+}

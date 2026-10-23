@@ -1,0 +1,58 @@
+{
+  "glm-copilot.command.setApiKey": "GLM: Set API Key",
+  "glm-copilot.command.getApiKey": "GLM: Get API Key",
+  "glm-copilot.command.clearApiKey": "GLM: Clear API Key",
+  "glm-copilot.command.openSettings": "GLM: Open Settings",
+  "glm-copilot.command.showLogs": "GLM: Show Logs",
+  "glm-copilot.command.refreshUsage": "GLM: Refresh Usage",
+  "glm-copilot.command.openUsageDetail": "GLM: Show Usage Details",
+  "glm-copilot.command.useResetQuota": "GLM: Use Reset Quota",
+  "glm-copilot.command.openActivity": "GLM: Show Activity",
+  "glm-copilot.command.openVisionPromptSettings": "GLM: Edit Flash Image Analysis Prompt",
+
+  "glm-copilot.walkthrough.title": "GLM Models for GitHub Copilot Chat",
+  "glm-copilot.walkthrough.description": "Set up GLM models in GitHub Copilot Chat.",
+
+  "glm-copilot.walkthrough.setApiKey.title": "Set your GLM API key",
+  "glm-copilot.walkthrough.setApiKey.description": "[Get an API key](command:glm-copilot.getApiKey) from z.ai or bigmodel.cn.\n[Set API Key](command:glm-copilot.setApiKey)",
+
+  "glm-copilot.walkthrough.chooseApi.title": "Choose your GLM API",
+  "glm-copilot.walkthrough.chooseApi.description": "Select between the GLM Coding Plan and the Standard API, and choose your region.\n[Open settings](command:glm-copilot.openSettings)",
+
+  "glm-copilot.walkthrough.showModels.title": "Show GLM models in the picker",
+  "glm-copilot.walkthrough.showModels.description": "Your GLM models appear in the Copilot Chat model picker, filtered by your selected API Mode. If they are hidden, open the Language Models manager to show them.\n[Open Language Models](command:workbench.action.chat.manage)",
+
+  "glm-copilot.walkthrough.useImages.title": "Use image input",
+  "glm-copilot.walkthrough.useImages.description": "Attach images directly. GLM-5.3-Flash handles them natively and provides visual context when a text-only model is selected.\n[Edit image analysis prompt](command:glm-copilot.openVisionPromptSettings)",
+
+  "glm-copilot.config.title": "GLM Models for GitHub Copilot Chat",
+
+  "glm-copilot.config.apiMode.description": "Which GLM API to use.\n\n- **Coding Plan** — uses your GLM Coding Plan subscription ([Z.ai](https://z.ai/manage-apikey/subscription) International or [bigmodel.cn](https://bigmodel.cn/coding-plan/personal/overview) Mainland China). The active endpoint depends on the `region` setting. Best for teams or heavy coding use.\n- **Standard API** — pay-as-you-go access via the GLM Open Platform. The active endpoint depends on the `region` setting.",
+  "glm-copilot.config.apiMode.codingPlan.label": "Coding Plan",
+  "glm-copilot.config.apiMode.codingPlan.description": "Use your GLM Coding Plan subscription. The endpoint depends on `region`: International → `api.z.ai/api/coding/paas/v4`, Mainland China → `open.bigmodel.cn/api/coding/paas/v4`.",
+  "glm-copilot.config.apiMode.standard.label": "Standard API",
+  "glm-copilot.config.apiMode.standard.description": "Pay-as-you-go access via the GLM Open Platform. The active endpoint is chosen by the `region` setting.",
+
+  "glm-copilot.config.region.description": "Server region for **Coding Plan** and **Standard API**, including GLM-5.3-Flash image analysis.\n\n- **International** (Z.ai account) — Coding Plan `api.z.ai/api/coding/paas/v4`, Standard `api.z.ai/api/paas/v4`\n- **Mainland China** (Zhipu AI account) — Coding Plan `open.bigmodel.cn/api/coding/paas/v4`, Standard `open.bigmodel.cn/api/paas/v4`",
+  "glm-copilot.config.region.international.label": "International (z.ai)",
+  "glm-copilot.config.region.china.label": "Mainland China (bigmodel.cn)",
+
+  "glm-copilot.config.baseUrl.description": "Override the GLM API base URL. When set, this value is used verbatim and both `apiMode` and `region` are ignored. All built-in models remain visible because the extension cannot infer this endpoint's capabilities, unless a custom model with the same id replaces its built-in definition. Image fallback also uses this endpoint and the normal chat key; the extension never sends images to a different official endpoint.",
+
+  "glm-copilot.config.maxTokens.description": "Maximum number of output tokens per request. Set to `0` to use the API default (no explicit limit). Useful for controlling costs.",
+
+  "glm-copilot.config.maxRetries.description": "Maximum automatic retries for transient chat failures (HTTP 429 rate limits and 5xx server errors), not counting the initial attempt. Set to `0` to disable automatic retries and fail fast. Retries wait with exponential backoff and honor the server's `Retry-After` header.",
+
+  "glm-copilot.config.modelIdOverrides.description": "Remap a built-in model's API id. Keys are the model id shown in the picker (e.g. `glm-4.7`); values are the id sent to the API. Use this for proxies or regional endpoints (such as bigmodel.cn) that use different model names. To add brand-new models, use `customModels` instead.",
+  "glm-copilot.config.customModels.description": "Add your own GLM models to the picker. Each entry is either a model id string (e.g. `\"glm-4.7\"`) or an object such as `{ \"id\": \"my-model\", \"name\": \"My Model\", \"nativeImageInput\": true }`. Custom models always appear regardless of API Mode and are sent to the active endpoint. Set `nativeImageInput` only when the endpoint accepts image content directly; otherwise attached images use GLM-5.3-Flash fallback.",
+
+  "glm-copilot.config.thinking.description": "Whether GLM uses step-by-step reasoning before answering. Applies to models without a per-model Thinking Effort control. GLM-5.2 uses None / High / Max; GLM-5.3 and GLM-5.3-Flash require thinking and use Low / High / Max (Max by default).\n\n- **On** — higher quality on complex coding and agent tasks (slower).\n- **Off** — faster responses for simple edits.",
+  "glm-copilot.config.thinking.enabled.label": "On",
+  "glm-copilot.config.thinking.disabled.label": "Off",
+
+  "glm-copilot.config.visionPrompt.description": "Instruction sent to GLM-5.3-Flash when a selected model cannot accept image attachments natively. Leave empty to use the built-in prompt, which transcribes visible text/code and describes UI, diagrams, and charts without speculating. Analysis uses the same endpoint and API key as chat. Changing this re-analyzes images on the next turn. Open directly with [`GLM: Edit Flash Image Analysis Prompt`](command:glm-copilot.openVisionPromptSettings).",
+
+  "glm-copilot.config.debugLogging.description": "Enable verbose debug logging to the GLM output channel. Use [`GLM: Show Logs`](command:glm-copilot.showLogs) to view the channel. Logs may include request metadata but not prompt text.",
+  "glm-copilot.config.usageRefreshIntervalMinutes.description": "How often (in minutes) to refresh the GLM usage status bar. Minimum 1, maximum 1440 (24 hours). Shows Coding Plan quota or Standard API balance for both International (z.ai) and Mainland China (bigmodel.cn) regions. Only available when no `baseUrl` override is configured.",
+  "glm-copilot.config.showUsageStatusBar.description": "Show the GLM usage status-bar item. Displays Coding Plan quota or Standard API balance for both International (z.ai) and Mainland China (bigmodel.cn) regions. Only available when no `baseUrl` override is configured."
+}
