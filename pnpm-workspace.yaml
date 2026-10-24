@@ -1,3 +1,7 @@
 allowBuilds:
   '@vscode/vsce-sign': true
   keytar: true
+overrides:
+  vite: ^8.1.6
+  postcss: ^8.5.23
+  source-map-js: ^1.2.2
