@@ -203,11 +203,12 @@ function renderOkBody(msg: UsagePanelMessage): string {
 	for (const metric of msg.metrics) {
 		lines.push(renderMetricCard(metric, s));
 	}
+	lines.push('</div>');
 	if (msg.resetQuota) {
-		// Inside the grid so the 12px gap applies and `grid-column: 1 / -1` spans it full-width.
+		// Outside the metrics grid: a spanning item inside it would occupy every auto-fit track
+		// and stop the grid from collapsing empty tracks, leaving a dead column beside the cards.
 		lines.push(renderResetQuotaCard(msg.resetQuota, s));
 	}
-	lines.push('</div>');
 	if (msg.balance) {
 		lines.push(renderBalanceBody(msg));
 	}

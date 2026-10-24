@@ -95,7 +95,8 @@ export function panelThemeCss(theme: 'dark' | 'light'): string {
 		background: var(--glm-card-bg);
 		min-width: 0;
 	}
-	.reset-card { grid-column: 1 / -1; }
+	/* Sits below the metrics grid; margin mirrors the grid gap so spacing stays identical */
+	.reset-card { margin-top: 12px; }
 	.card-head {
 		display: flex;
 		align-items: baseline;
