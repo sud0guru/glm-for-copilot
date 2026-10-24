@@ -5,3 +5,4 @@ overrides:
   vite: ^8.1.6
   postcss: ^8.5.23
   source-map-js: ^1.2.2
+  '@azure/msal-node': ^7.1.0
