@@ -1,6 +1,6 @@
 # GLM Models for GitHub Copilot Chat
 
-[![VS Marketplace Version](https://img.shields.io/badge/Marketplace-0.1.0-1f6feb)](https://marketplace.visualstudio.com/items?itemName=sud0guru.glm-for-github-copilot-chat)
+[![VS Marketplace Version](https://img.shields.io/badge/Marketplace-0.1.1-1f6feb)](https://marketplace.visualstudio.com/items?itemName=sud0guru.glm-for-github-copilot-chat)
 [![VS Marketplace Installs](https://vsmarketplacebadges.dev/installs-short/sud0guru.glm-for-github-copilot-chat.svg)](https://marketplace.visualstudio.com/items?itemName=sud0guru.glm-for-github-copilot-chat)
 [![Install from VS Code Marketplace](https://img.shields.io/badge/VS%20Code-Install-007ACC)](https://marketplace.visualstudio.com/items?itemName=sud0guru.glm-for-github-copilot-chat)
 [![CI](https://github.com/sud0guru/glm-for-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/sud0guru/glm-for-copilot/actions/workflows/ci.yml)

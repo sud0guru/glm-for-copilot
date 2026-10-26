@@ -2,9 +2,7 @@
 
 All notable changes to GLM Models for GitHub Copilot Chat are documented here.
 
-## Unreleased
-
-### Fixed
+## 0.1.1
 
 - **Usage panel** - the Reset Quota card now renders below the metrics grid instead of spanning it, which left a dead empty column beside the 5-hour and weekly limit cards on panels wider than ~865px.
 
