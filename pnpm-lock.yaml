@@ -21,8 +21,8 @@ importers:
         specifier: ^20.0.0
         version: 20.19.43
       '@types/vscode':
-        specifier: ^1.140.0
-        version: 1.140.0
+        specifier: ^1.144.0
+        version: 1.144.0
       '@vscode/vsce':
         specifier: ^4.0.0
         version: 4.0.0(supports-color@7.2.0)
@@ -400,8 +400,8 @@ packages:
   '@types/node@20.19.43':
     resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
 
-  '@types/vscode@1.140.0':
-    resolution: {integrity: sha512-KAB5RBZIgnUhpp4mKsVJPPHLOQKu6WtGy2xpfWjaajEXO4xIIC+UESAXLiQ9ewx6QD1uBmvC/S8BJzkbvv4bRA==}
+  '@types/vscode@1.144.0':
+    resolution: {integrity: sha512-IDd4eQzu6MjGucfaQF0V/TY5vHX9o1albkKyZD6K/iVXSCcL5NSj4KW1wWfx1QDadPKWyxMaE/+M1wKLCJlXpA==}
 
   '@typescript-eslint/eslint-plugin@8.72.0':
     resolution: {integrity: sha512-aysKgysPX9XOv/dk95UkvUDe++Q3n3dJPG9CEWT3RUccxfkPJ+Qn6nhKPDhZXU6Ofo9kgwGWwKyQCnZIXTgngg==}
@@ -1689,7 +1689,7 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
-  '@types/vscode@1.140.0': {}
+  '@types/vscode@1.144.0': {}
 
   '@typescript-eslint/eslint-plugin@8.72.0(@typescript-eslint/parser@8.72.0(eslint@10.13.0(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3))(eslint@10.13.0(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)':
     dependencies:
